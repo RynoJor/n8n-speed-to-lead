@@ -1,0 +1,10 @@
+# n8n runtime data (database, encryption key, logs)
+.n8n-data/
+# local owner login for the self-hosted n8n
+local-credentials.md
+.env
+node_modules/
+__pycache__/
+*.log
+!output/
+.n8n-runtime/

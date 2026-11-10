@@ -1,0 +1,19 @@
+{
+  "leads": 20,
+  "routed": 18,
+  "rejected": 2,
+  "errors": 0,
+  "dedupe_hits": 6,
+  "end_to_end_ms_median": 163.2,
+  "end_to_end_ms_max": 195.9,
+  "routed_workflow_ms_median": 113.0,
+  "routed_workflow_ms_max": 142,
+  "stage_ms_median": {
+    "validate": 14.0,
+    "dedupe": 18.0,
+    "enrich": 12.0,
+    "score": 12.0,
+    "assign": 12.0,
+    "alert": 42.5
+  }
+}

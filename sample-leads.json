@@ -1,0 +1,22 @@
+[
+  {"lead_id": "S01", "company": "Quillbrook Pilates Studio", "contact_name": "Avery Example", "email": "avery@quillbrookpilates.example", "region": "EMEA", "source": "demo_request"},
+  {"lead_id": "S02", "company": "Maplewood Physio", "contact_name": "Jordan Lee", "email": "jordan@maplewoodphysio.example", "region": "North America", "source": "free_trial"},
+  {"lead_id": "S03", "company": "Sunridge Coffee Co.", "contact_name": "Priya Nair", "email": "priya@sunridgecoffee.example", "region": "APAC", "source": "website_form"},
+  {"lead_id": "S04", "company": "Larkwell Bakery", "contact_name": "Nora Galloway", "email": "Nora@LarkwellBakery.example", "region": "EMEA", "source": "website_form"},
+  {"lead_id": "S05", "company": "Riverlight Clinik", "contact_name": "Sam Ortiz", "email": "s.ortiz@riverlightclinic.example", "region": "North America", "source": "demo_request"},
+  {"lead_id": "S06", "company": "Silverlight Clinic", "contact_name": "Dana Fox", "email": "dana@silverlightclinic.example", "region": "North America", "source": "free_trial"},
+  {"lead_id": "S07", "company": "Tallgrass Barbers", "contact_name": "Eli Moss", "email": "", "region": "EMEA", "source": "website_form"},
+  {"lead_id": "S08", "company": "Harbor Lights Lodge", "contact_name": "Tom Reyes", "email": "tom@@harborlights", "region": "LATAM", "source": "content_download"},
+  {"lead_id": "S09", "company": "Glowhaus Salon", "contact_name": "Lucia Romero", "email": "lucia.glowhaus@gmail.com", "region": "LATAM", "source": "content_download"},
+  {"lead_id": "S10", "company": "Tidewater Consulting", "contact_name": "Hana Sato", "email": "hana@tidewaterconsulting.example", "region": "", "source": "website_form"},
+  {"lead_id": "S11", "company": "Brightpath Tutoring Ltd", "contact_name": "Ken Ito", "email": "ken.ito@gmail.com", "region": "APAC", "source": "free_trial"},
+  {"lead_id": "S12", "company": "Kestrel Fitness", "contact_name": "Mia Chen", "email": "mia@kestrelfitness.example", "region": "APAC", "source": "demo_request"},
+  {"lead_id": "S13", "company": "Quillbrook Pilates", "contact_name": "Avery Example", "email": "avery@quillbrookpilates.example", "region": "EMEA", "source": "free_trial"},
+  {"lead_id": "S14", "company": "Ashgrove Dental", "contact_name": "Ben Carter", "email": "ben@ashgrovedental.example", "region": "North America", "source": "website_form"},
+  {"lead_id": "S15", "company": "Cobalt Legal Advisors", "contact_name": "Freya Lund", "email": "freya@cobaltlegal.example", "region": "EMEA", "source": "demo_request"},
+  {"lead_id": "S16", "company": "Fernhill Bistro", "contact_name": "Marco Bellini", "email": "marco@fernhillbistro.example", "region": "EMEA", "source": "content_download"},
+  {"lead_id": "S17", "company": "Northgate Motors", "contact_name": "Diego Alvarez", "email": "diego@northgatemotors.example", "region": "LATAM", "source": "free_trial"},
+  {"lead_id": "S18", "company": "Willowbrook Inn", "contact_name": "Grace Kim", "email": "grace@willowbrookinn.example", "region": "North America", "source": "website_form"},
+  {"lead_id": "S19", "company": "Pinecrest Dental", "contact_name": "Owen Price", "email": "owen.price@gmail.com", "region": "North America", "source": "demo_request"},
+  {"lead_id": "S20", "company": "Harbour Auto Garage", "contact_name": "Leo Tanaka", "email": "leo.t@harborauto.example", "region": "APAC", "source": "website_form"}
+]

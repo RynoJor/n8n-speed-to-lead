@@ -1,0 +1,21 @@
+lead_id,http_status,status,assigned_rep,rep_name,assign_reason,score,dedupe_hit,dedupe_match,flags,validate_ms,dedupe_ms,enrich_ms,score_ms,assign_ms,alert_ms,workflow_ms,http_ms
+S01,200,routed,R03,Jill Rhodes,round_robin,80,False,,alert_logged,18,20,15,14,14,44,125,195.91
+S02,200,routed,R02,Joshua Walker,round_robin (skipped 1 at capacity),95,False,,alert_logged,17,20,14,13,14,46,124,172.29
+S03,200,routed,R05,Robert Johnson,round_robin,55,False,,alert_logged,15,20,13,13,13,48,122,170.98
+S04,200,routed,R03,Jill Rhodes,existing owner (email match),55,True,email:L-0001,duplicate_contact;alert_logged,12,16,11,12,10,45,106,148.16
+S05,200,routed,R01,Danielle Johnson,existing owner (company match),100,True,company:L-0002,known_account;alert_logged,12,18,13,17,18,64,142,194.33
+S06,200,routed,R02,Joshua Walker,round_robin (skipped 1 at capacity),75,False,,alert_logged,16,18,11,14,13,44,116,170.05
+S07,422,rejected,,,,,False,,missing_email,12,,,,,,26,77.85
+S08,422,rejected,,,,,False,,invalid_email,13,,,,,,27,77.86
+S09,200,routed,R06,Jeffery Wagner,round_robin,10,False,,public_email_domain;alert_logged,16,18,12,12,12,46,116,172.54
+S10,200,routed,R02,Joshua Walker,round_robin (skipped 1 at capacity),80,False,,missing_region;unknown_region;alert_logged,16,18,13,12,11,40,110,160.16
+S11,200,routed,R05,Robert Johnson,existing owner (company match),30,True,company:L-0003,known_account;public_email_domain;alert_logged,12,13,11,12,12,40,100,172.91
+S12,200,routed,R05,Robert Johnson,least_loaded (region at capacity),95,False,,over_capacity;alert_logged,12,18,9,11,12,37,99,140.39
+S13,200,routed,R03,Jill Rhodes,existing owner (email match),75,True,email:S01,duplicate_contact;alert_logged,12,16,11,12,12,41,104,149.13
+S14,200,routed,R02,Joshua Walker,round_robin (skipped 1 at capacity),85,False,,alert_logged,11,15,13,11,13,39,102,148.47
+S15,200,routed,R04,Patricia Miller,round_robin,95,False,,alert_logged,20,18,12,11,12,41,114,160.31
+S16,200,routed,R04,Patricia Miller,round_robin (skipped 1 at capacity),65,False,,alert_logged,15,18,12,12,12,43,112,172.45
+S17,200,routed,R06,Jeffery Wagner,round_robin,80,False,,alert_logged,11,16,12,11,12,42,104,154.89
+S18,200,routed,R02,Joshua Walker,round_robin (skipped 1 at capacity),70,False,,alert_logged,14,18,16,20,11,41,120,174.93
+S19,200,routed,R02,Joshua Walker,existing owner (email match),35,True,email:L-0008,duplicate_contact;public_email_domain;alert_logged,14,16,12,11,15,49,117,166.16
+S20,200,routed,R05,Robert Johnson,existing owner (company match),70,True,company:L-0006,known_account;alert_logged,12,20,10,12,13,42,109,156.46

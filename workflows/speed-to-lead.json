@@ -1,0 +1,570 @@
+{
+  "name": "Speed-to-lead router",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "speed-to-lead",
+        "responseMode": "responseNode",
+        "options": {}
+      },
+      "name": "Inbound form (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-001030421879",
+      "webhookId": "5d1e6b52-7c3a-4f1e-9a51-1f0c2b7a8d01"
+    },
+    {
+      "parameters": {
+        "mode": "manual",
+        "assignments": {
+          "assignments": [
+            {
+              "id": "s1",
+              "name": "t_start",
+              "value": "={{ $now.toMillis() }}",
+              "type": "number"
+            },
+            {
+              "id": "s2",
+              "name": "rep_capacity",
+              "value": 12,
+              "type": "number"
+            },
+            {
+              "id": "s3",
+              "name": "slack_alerts",
+              "value": false,
+              "type": "boolean"
+            },
+            {
+              "id": "s4",
+              "name": "alert_log_path",
+              "value": "output/alerts.log",
+              "type": "string"
+            }
+          ]
+        },
+        "includeOtherFields": false,
+        "options": {}
+      },
+      "name": "Settings",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 3.4,
+      "position": [
+        200,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-000473154195",
+      "notes": "slack_alerts: set true once a Slack credential is attached",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Stage 1: validate. Same rule as route.py: a missing or malformed email rejects the lead,\n// any other missing field is flagged and routing carries on.\n// The Code node sandbox has no performance timer, so stamps are Date.now() (1 ms resolution).\nconst now = () => Date.now();\nconst start = $('Settings').first().json.t_start;\n\nconst REQUIRED = ['company', 'contact_name', 'email', 'region', 'source'];\nconst EMAIL_RE = /^[A-Za-z0-9._%+\\-]+@[A-Za-z0-9\\-]+(\\.[A-Za-z0-9\\-]+)*\\.[A-Za-z]{2,}$/;\n\nconst body = $('Inbound form (Webhook)').first().json.body || {};\nconst lead = {};\nfor (const [k, v] of Object.entries(body)) lead[k] = typeof v === 'string' ? v.trim() : v;\n\nconst flags = [];\nfor (const f of REQUIRED) if (!lead[f]) flags.push(`missing_${f}`);\nif (lead.email && !EMAIL_RE.test(lead.email)) flags.push('invalid_email');\nconst valid = !flags.includes('invalid_email') && !flags.includes('missing_email');\n\nreturn [{\n  json: {\n    lead,\n    valid,\n    result: { lead_id: lead.lead_id || '', status: valid ? 'routed' : 'rejected', flags },\n    stamps: { start, validate: now() },\n  },\n}];\n"
+      },
+      "name": "Validate",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        400,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-003143913474",
+      "notes": "required fields, email format",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $json.valid }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Valid?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        600,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-001313222462"
+    },
+    {
+      "parameters": {
+        "jsCode": "// A rejected lead stops after validate: it has no usable email, so nobody can work it.\n// The Code node sandbox has no performance timer, so stamps are Date.now() (1 ms resolution).\nconst now = () => Date.now();\nconst end = now();\nconst { result, stamps } = $input.first().json;\nconst round = (x) => Math.round(x * 100) / 100;\nreturn [{\n  json: {\n    ...result,\n    assigned_rep: '',\n    stage_ms: { validate: round(stamps.validate - stamps.start) },\n    total_ms: round(end - stamps.start),\n  },\n}];\n"
+      },
+      "name": "Rejected",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        500
+      ],
+      "id": "00000000-0000-4000-8000-002066497107"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {
+          "responseCode": 422
+        }
+      },
+      "name": "Respond 422 (rejected)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        1000,
+        500
+      ],
+      "id": "00000000-0000-4000-8000-002762297135"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Stage 2: dedupe against the leads table.\n// The table lives in this workflow's static data (saved by n8n after each production run), seeded\n// with eight existing leads the first time it runs. Two checks, as in route.py:\n//   * exact email (case-insensitive): the same person again -> duplicate_contact\n//   * company name: a known account -> known_account. The normalised name matches exactly, or it\n//     matches fuzzily (similarity >= 0.85) AND a second signal agrees: same contact surname or same\n//     business email domain. Public mail domains never count as a signal.\n// The Code node sandbox has no performance timer, so stamps are Date.now() (1 ms resolution).\nconst now = () => Date.now();\nconst item = $input.first().json;\nconst { lead, result, stamps } = item;\n\nconst SEED_LEADS = [\n  { lead_id: 'L-0001', company: 'Larkwell Bakery LLC', contact_name: 'Nora Galloway', email: 'nora@larkwellbakery.example', owner: 'R03' },\n  { lead_id: 'L-0002', company: 'Riverlight Clinic', contact_name: 'Sam Ortiz', email: 'sam@riverlightclinic.example', owner: 'R01' },\n  { lead_id: 'L-0003', company: 'Brightpath Tutoring', contact_name: 'Ken Ito', email: 'ken@brightpathtutoring.example', owner: 'R05' },\n  { lead_id: 'L-0004', company: 'Oakhaven Realty Inc.', contact_name: 'Maya Brooks', email: 'maya@oakhavenrealty.example', owner: 'R02' },\n  { lead_id: 'L-0005', company: 'Copperleaf Yoga', contact_name: 'Ines Duarte', email: 'ines@copperleafyoga.example', owner: 'R04' },\n  { lead_id: 'L-0006', company: 'Harbor Auto Garage', contact_name: 'Leo Tanaka', email: 'leo@harborauto.example', owner: 'R05' },\n  { lead_id: 'L-0007', company: 'Mistral Design Studio', contact_name: 'Clara Weiss', email: 'clara@mistraldesign.example', owner: 'R03' },\n  { lead_id: 'L-0008', company: 'Pinecrest Dental', contact_name: 'Owen Price', email: 'owen.price@gmail.com', owner: 'R02' },\n];\nconst PUBLIC_DOMAINS = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'aol.com', 'proton.me'];\nconst LEGAL_SUFFIXES = ['llc', 'inc', 'co', 'ltd', 'corp', 'company', 'limited', 'gmbh', 'plc'];\nconst CUTOFF = 0.85;\n\nconst store = $getWorkflowStaticData('global');\nif (!Array.isArray(store.leads)) store.leads = SEED_LEADS;\n\nconst domainOf = (e) => (e && e.includes('@') ? e.split('@').pop().toLowerCase() : '');\nconst businessDomain = (e) => (PUBLIC_DOMAINS.includes(domainOf(e)) ? '' : domainOf(e));\nconst normCompany = (name) => {\n  const words = (name || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\\s+/).filter(Boolean);\n  while (words.length && LEGAL_SUFFIXES.includes(words[words.length - 1])) words.pop();\n  return words.join('');\n};\nconst surname = (name) => {\n  const words = (name || '').toLowerCase().replace(/[^a-z ]/g, ' ').split(/\\s+/).filter(Boolean);\n  return words.length ? words[words.length - 1] : '';\n};\n// Levenshtein similarity, 0..1 (route.py uses difflib's ratio; same idea, same cutoff).\nconst similarity = (a, b) => {\n  if (!a.length || !b.length) return 0;\n  let prev = Array.from({ length: b.length + 1 }, (_, j) => j);\n  for (let i = 1; i <= a.length; i++) {\n    const cur = [i];\n    for (let j = 1; j <= b.length; j++) {\n      cur[j] = Math.min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (a[i - 1] === b[j - 1] ? 0 : 1));\n    }\n    prev = cur;\n  }\n  return 1 - prev[b.length] / Math.max(a.length, b.length);\n};\n\nlet match = null;\nconst email = (lead.email || '').toLowerCase();\nconst byEmail = store.leads.find((l) => (l.email || '').toLowerCase() === email);\nif (byEmail) {\n  match = { kind: 'email', lead_id: byEmail.lead_id, owner: byEmail.owner };\n} else {\n  const company = normCompany(lead.company);\n  const name = surname(lead.contact_name);\n  const domain = businessDomain(lead.email);\n  if (company) {\n    const exact = store.leads.find((l) => normCompany(l.company) === company);\n    if (exact) {\n      match = { kind: 'company', lead_id: exact.lead_id, owner: exact.owner };\n    } else {\n      const fuzzy = store.leads\n        .map((l) => ({ l, s: similarity(company, normCompany(l.company)) }))\n        .filter((x) => x.s >= CUTOFF)\n        .sort((x, y) => y.s - x.s)\n        .find(({ l }) => (name && name === surname(l.contact_name)) || (domain && domain === businessDomain(l.email)));\n      if (fuzzy) match = { kind: 'company', lead_id: fuzzy.l.lead_id, owner: fuzzy.l.owner };\n    }\n  }\n}\n\nif (match) {\n  result.dedupe_hit = true;\n  result.dedupe_match = `${match.kind}:${match.lead_id}`;\n  result.flags.push(match.kind === 'email' ? 'duplicate_contact' : 'known_account');\n} else {\n  result.dedupe_hit = false;\n  result.dedupe_match = '';\n}\nstamps.dedupe = now();\nreturn [{ json: { lead, match, result, stamps, table_size: store.leads.length } }];\n"
+      },
+      "name": "Dedupe",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        800,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-002151692074",
+      "notes": "exact email, fuzzy company + 2nd signal",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Stage 3: enrich. *** STUB ***\n// A real build calls an enrichment API here (Clearbit / Apollo style) with the email domain.\n// This stand-in guesses industry from words in the domain and picks a company-size band from a\n// hash of the domain. It is deterministic and free, but the size band is not real information.\n// Values the form supplied are never overwritten. Public mail domains are skipped and flagged.\n// The Code node sandbox has no performance timer, so stamps are Date.now() (1 ms resolution).\nconst now = () => Date.now();\nconst item = $input.first().json;\nconst { lead, result, stamps } = item;\n\nconst PUBLIC_DOMAINS = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'aol.com', 'proton.me'];\nconst INDUSTRY_KEYWORDS = {\n  'Retail': ['boutique', 'market', 'supply', 'goods', 'outfitters', 'store', 'shop'],\n  'Food & Beverage': ['bistro', 'bakery', 'coffee', 'catering', 'kitchen', 'cafe', 'deli'],\n  'Professional Services': ['consulting', 'accounting', 'design', 'legal', 'advisors', 'law'],\n  'Health & Wellness': ['clinic', 'dental', 'physio', 'pharmacy', 'wellness', 'chiro', 'health'],\n  'Fitness': ['gym', 'athletics', 'yoga', 'fitness', 'pilates', 'crossfit'],\n  'Beauty & Personal Care': ['salon', 'spa', 'barbers', 'beauty', 'nails'],\n  'Real Estate': ['homes', 'realty', 'properties', 'estates'],\n  'Education': ['learning', 'academy', 'tutoring', 'school'],\n  'Automotive': ['auto', 'motors', 'tires', 'garage'],\n  'Hospitality': ['inn', 'lodge', 'guesthouse', 'hotel', 'suites'],\n};\nconst SIZE_BANDS = ['1-10', '11-50', '51-200'];\n// FNV-1a: a tiny deterministic hash so the stub needs no crypto module.\nconst fnv1a = (s) => {\n  let h = 0x811c9dc5;\n  for (const ch of s) { h ^= ch.charCodeAt(0); h = Math.imul(h, 0x01000193) >>> 0; }\n  return h;\n};\n\nconst out = { ...lead };\nconst filled = {};\nconst domain = lead.email && lead.email.includes('@') ? lead.email.split('@').pop().toLowerCase() : '';\nif (domain && PUBLIC_DOMAINS.includes(domain)) {\n  result.flags.push('public_email_domain');\n} else if (domain) {\n  const stem = domain.split('.')[0];\n  if (!out.industry) {\n    let best = null; // longest keyword wins\n    for (const [industry, words] of Object.entries(INDUSTRY_KEYWORDS)) {\n      for (const w of words) if (stem.includes(w) && (!best || w.length > best[0])) best = [w.length, industry];\n    }\n    if (best) out.industry = filled.industry = best[1];\n  }\n  if (!out.company_size) out.company_size = filled.company_size = SIZE_BANDS[fnv1a(domain) % SIZE_BANDS.length];\n  if (!out.industry) result.flags.push('enrich_no_industry');\n}\nresult.enriched_fields = filled;\nresult.enrich_source = 'stub';\nstamps.enrich = now();\nreturn [{ json: { ...item, lead: out, result, stamps } }];\n"
+      },
+      "name": "Enrich (STUB)",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1000,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-001996346194",
+      "notes": "STUB: domain keyword lookup",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Stage 4: score. Fit score 0-100, the same points as fit_score() in route.py:\n// buying intent (source) + company size + industry fit + business email.\n// The Code node sandbox has no performance timer, so stamps are Date.now() (1 ms resolution).\nconst now = () => Date.now();\nconst item = $input.first().json;\nconst { lead, result, stamps } = item;\n\nconst SOURCE_POINTS = { demo_request: 35, free_trial: 30, website_form: 20, content_download: 10 };\nconst SIZE_POINTS = { '51-200': 30, '11-50': 25, '1-10': 10 };\nconst CORE_INDUSTRIES = ['Health & Wellness', 'Fitness', 'Beauty & Personal Care', 'Professional Services'];\nconst PUBLIC_DOMAINS = ['gmail.com', 'yahoo.com', 'outlook.com', 'hotmail.com', 'icloud.com', 'aol.com', 'proton.me'];\n\nlet score = SOURCE_POINTS[lead.source] || 0;\nscore += SIZE_POINTS[lead.company_size] || 0;\nscore += CORE_INDUSTRIES.includes(lead.industry) ? 20 : lead.industry ? 10 : 0;\nconst domain = lead.email && lead.email.includes('@') ? lead.email.split('@').pop().toLowerCase() : '';\nscore += domain && !PUBLIC_DOMAINS.includes(domain) ? 15 : 0;\n\nresult.score = Math.min(score, 100);\nstamps.score = now();\nreturn [{ json: { ...item, result, stamps } }];\n"
+      },
+      "name": "Score",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1200,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-004082636885",
+      "notes": "fit 0-100",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Stage 5: assign.\n// A dedupe hit goes to the rep who already owns that person or account. Otherwise: round-robin\n// within the lead's region, skipping reps whose open leads are at capacity. If the whole region\n// is full, the least-loaded rep in the region gets it and the lead is flagged over_capacity, so it\n// is never left unowned. Unknown region: the same rule across all reps, flagged unknown_region.\n// Rep loads and the rotation position live in workflow static data, next to the leads table.\n// The Code node sandbox has no performance timer, so stamps are Date.now() (1 ms resolution).\nconst now = () => Date.now();\nconst item = $input.first().json;\nconst { lead, match, result, stamps } = item;\nconst capacity = Number($('Settings').first().json.rep_capacity);\n\nconst REPS = [\n  { rep_id: 'R01', rep_name: 'Danielle Johnson', region: 'North America' },\n  { rep_id: 'R02', rep_name: 'Joshua Walker', region: 'North America' },\n  { rep_id: 'R03', rep_name: 'Jill Rhodes', region: 'EMEA' },\n  { rep_id: 'R04', rep_name: 'Patricia Miller', region: 'EMEA' },\n  { rep_id: 'R05', rep_name: 'Robert Johnson', region: 'APAC' },\n  { rep_id: 'R06', rep_name: 'Jeffery Wagner', region: 'LATAM' },\n];\n// Open leads (status new or contacted) each rep already holds when the demo starts.\nconst SEED_LOAD = { R01: 12, R02: 7, R03: 9, R04: 8, R05: 10, R06: 4 };\n\nconst store = $getWorkflowStaticData('global');\nif (!store.load) store.load = { ...SEED_LOAD };\nif (!store.next) store.next = {};\nconst take = (repId) => { store.load[repId] = (store.load[repId] || 0) + 1; return repId; };\n\nlet repId, reason;\nif (match && REPS.some((r) => r.rep_id === match.owner)) {\n  repId = take(match.owner);\n  reason = `existing owner (${match.kind} match)`;\n} else {\n  let poolKey = lead.region;\n  let pool = REPS.filter((r) => r.region === lead.region).map((r) => r.rep_id).sort();\n  if (!pool.length) {\n    result.flags.push('unknown_region');\n    poolKey = '*';\n    pool = REPS.map((r) => r.rep_id).sort();\n  }\n  const start = store.next[poolKey] || 0;\n  for (let step = 0; step < pool.length && !repId; step++) {\n    const i = (start + step) % pool.length;\n    if ((store.load[pool[i]] || 0) < capacity) {\n      store.next[poolKey] = (i + 1) % pool.length;\n      repId = take(pool[i]);\n      reason = 'round_robin' + (step ? ` (skipped ${step} at capacity)` : '');\n    }\n  }\n  if (!repId) {\n    const least = [...pool].sort((a, b) => (store.load[a] - store.load[b]) || a.localeCompare(b))[0];\n    repId = take(least);\n    reason = 'least_loaded (region at capacity)';\n    result.flags.push('over_capacity');\n  }\n}\n\n// Add the lead to the leads table so the next submission dedupes against it.\nstore.leads.push({\n  lead_id: lead.lead_id || `N8N-${String(store.leads.length + 1).padStart(4, '0')}`,\n  company: lead.company || '', contact_name: lead.contact_name || '', email: lead.email || '', owner: repId,\n});\n\nconst rep = REPS.find((r) => r.rep_id === repId);\nresult.assigned_rep = repId;\nresult.rep_name = rep.rep_name;\nresult.assign_reason = reason;\nresult.rep_open_leads = store.load[repId];\nstamps.assign = now();\nreturn [{ json: { ...item, result, stamps } }];\n"
+      },
+      "name": "Assign",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1400,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-001972284567",
+      "notes": "owner, else round-robin by region",
+      "notesInFlow": true
+    },
+    {
+      "parameters": {
+        "jsCode": "// Stage 6a: compose the alert text (same wording as build_alert() in route.py).\nconst item = $input.first().json;\nconst { lead, result } = item;\nconst who = result.rep_name ? `${result.rep_name} (${result.assigned_rep})` : result.assigned_rep || 'nobody';\nconst lines = [\n  `:rotating_light: New inbound lead for ${who}`,\n  `*${lead.contact_name || '?'}* at *${lead.company || '?'}* (${lead.region || 'region unknown'})`,\n  `Email: ${lead.email} | Source: ${lead.source} | Fit score: ${result.score}`,\n  `Industry: ${lead.industry || '?'} | Size: ${lead.company_size || '?'}`,\n  `Why this rep: ${result.assign_reason}`,\n];\nif (result.dedupe_hit) lines.push(`Known contact/account: ${result.dedupe_match}`);\nif (result.flags.length) lines.push(`Flags: ${result.flags.join(', ')}`);\nlines.push('Reply now: inbound leads answered within the hour close far more often.');\nconst text = lines.join('\\n');\nconst logLine = `[${new Date().toISOString()}] ${result.lead_id || '(new lead)'} -> ${result.assigned_rep}\\n${text}\\n---\\n`;\nreturn [{ json: { ...item, alert_text: text, alert_log_line: logLine } }];\n"
+      },
+      "name": "Compose alert",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1600,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-002516851095"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "loose",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "c1",
+              "leftValue": "={{ $('Settings').first().json.slack_alerts }}",
+              "rightValue": "",
+              "operator": {
+                "type": "boolean",
+                "operation": "true",
+                "singleValue": true
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "name": "Slack alerts on?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1800,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-002428021510"
+    },
+    {
+      "parameters": {
+        "select": "channel",
+        "channelId": {
+          "__rl": true,
+          "mode": "name",
+          "value": "#inbound-leads"
+        },
+        "text": "={{ $json.alert_text }}",
+        "otherOptions": {}
+      },
+      "name": "Slack alert",
+      "type": "n8n-nodes-base.slack",
+      "typeVersion": 2.3,
+      "position": [
+        2000,
+        180
+      ],
+      "id": "00000000-0000-4000-8000-000197030013",
+      "disabled": true,
+      "notes": "Off until a Slack credential is attached",
+      "notesInFlow": true,
+      "webhookId": "6f965e12-df5e-4383-bb6d-b3238cba2a0e"
+    },
+    {
+      "parameters": {
+        "operation": "toText",
+        "sourceProperty": "alert_log_line",
+        "options": {
+          "fileName": "alerts.log"
+        }
+      },
+      "name": "Alert to text",
+      "type": "n8n-nodes-base.convertToFile",
+      "typeVersion": 1.1,
+      "position": [
+        2000,
+        420
+      ],
+      "id": "00000000-0000-4000-8000-004290424349"
+    },
+    {
+      "parameters": {
+        "operation": "write",
+        "fileName": "={{ $('Settings').first().json.alert_log_path }}",
+        "options": {
+          "append": true
+        }
+      },
+      "name": "Append to alert log",
+      "type": "n8n-nodes-base.readWriteFile",
+      "typeVersion": 1,
+      "position": [
+        2200,
+        420
+      ],
+      "id": "00000000-0000-4000-8000-000058709308"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Turn the timing stamps into ms per stage and build the JSON response.\n// Each stage's time runs from the end of the previous stage to the end of this one, so it\n// includes n8n's own hand-off between nodes, not just the JavaScript inside the node.\n// The Code node sandbox has no performance timer, so stamps are Date.now() (1 ms resolution).\nconst now = () => Date.now();\nconst end = now();\nconst base = $('Compose alert').first().json;\nconst { result, stamps } = base;\nconst channel = $('Settings').first().json.slack_alerts ? 'slack' : 'log';\nconst round = (x) => Math.round(x * 100) / 100;\nconst order = ['validate', 'dedupe', 'enrich', 'score', 'assign'];\nconst stage_ms = {};\nlet prev = stamps.start;\nfor (const s of order) { stage_ms[s] = round(stamps[s] - prev); prev = stamps[s]; }\nstage_ms.alert = round(end - stamps.assign);\nreturn [{\n  json: {\n    ...result,\n    alert_channel: channel,\n    flags: [...result.flags, channel === 'slack' ? 'alert_slack' : 'alert_logged'],\n    stage_ms,\n    total_ms: round(end - stamps.start),\n  },\n}];\n"
+      },
+      "name": "Stage timings",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2400,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-001613942249"
+    },
+    {
+      "parameters": {
+        "respondWith": "firstIncomingItem",
+        "options": {}
+      },
+      "name": "Respond 200 (routed)",
+      "type": "n8n-nodes-base.respondToWebhook",
+      "typeVersion": 1.4,
+      "position": [
+        2600,
+        300
+      ],
+      "id": "00000000-0000-4000-8000-001987840771"
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "speed-to-lead-reset",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "name": "Reset demo (Webhook)",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [
+        0,
+        500
+      ],
+      "id": "00000000-0000-4000-8000-001769655576",
+      "webhookId": "5d1e6b52-7c3a-4f1e-9a51-1f0c2b7a8d02"
+    },
+    {
+      "parameters": {
+        "jsCode": "// Demo only: clear the leads table, rep loads and rotation so a replay starts from the seed.\n// Remove this branch (or put auth on it) before using the workflow for real.\nconst store = $getWorkflowStaticData('global');\nfor (const k of Object.keys(store)) delete store[k];\nreturn [{ json: { reset: true } }];\n"
+      },
+      "name": "Clear leads table",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        200,
+        500
+      ],
+      "id": "00000000-0000-4000-8000-001664897332",
+      "notes": "demo only",
+      "notesInFlow": true
+    }
+  ],
+  "connections": {
+    "Inbound form (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Settings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Settings": {
+      "main": [
+        [
+          {
+            "node": "Validate",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Validate": {
+      "main": [
+        [
+          {
+            "node": "Valid?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Valid?": {
+      "main": [
+        [
+          {
+            "node": "Dedupe",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Rejected",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Rejected": {
+      "main": [
+        [
+          {
+            "node": "Respond 422 (rejected)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Dedupe": {
+      "main": [
+        [
+          {
+            "node": "Enrich (STUB)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Enrich (STUB)": {
+      "main": [
+        [
+          {
+            "node": "Score",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Score": {
+      "main": [
+        [
+          {
+            "node": "Assign",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Assign": {
+      "main": [
+        [
+          {
+            "node": "Compose alert",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Compose alert": {
+      "main": [
+        [
+          {
+            "node": "Slack alerts on?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack alerts on?": {
+      "main": [
+        [
+          {
+            "node": "Slack alert",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "Alert to text",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Alert to text": {
+      "main": [
+        [
+          {
+            "node": "Append to alert log",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Slack alert": {
+      "main": [
+        [
+          {
+            "node": "Stage timings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append to alert log": {
+      "main": [
+        [
+          {
+            "node": "Stage timings",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Stage timings": {
+      "main": [
+        [
+          {
+            "node": "Respond 200 (routed)",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Reset demo (Webhook)": {
+      "main": [
+        [
+          {
+            "node": "Clear leads table",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "all"
+  },
+  "pinData": {},
+  "active": false,
+  "staticData": null,
+  "tags": []
+}
